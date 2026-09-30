@@ -193,7 +193,8 @@ const ICON={
   back:'<path d="M15 18l-6-6 6-6"/>',
   trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
   download:'<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
-  check:'<path d="M20 6 9 17l-5-5"/>'
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'
 };
 const svg=(n,cls='')=>`<svg viewBox="0 0 24 24" class="${cls}">${ICON[n]||''}</svg>`;
 const NAV=[['dashboard','Dashboard'],['invoices','Invoices'],['clients','Clients'],['settings','Settings']];
@@ -493,9 +494,36 @@ function viewInvoice(id){
   </div>
   <div class="mf"><div class="pill-actions">
     <button class="btn ghost sm" onclick="editInvoice('${inv.id}')">Edit</button>
+    ${effStatus(inv)!=='paid'?`<button class="btn sm" onclick="emailInvoice('${inv.id}','send')">${svg('mail')} Send invoice</button>`:''}
+    ${effStatus(inv)==='overdue'||effStatus(inv)==='sent'?`<button class="btn ghost sm" onclick="emailInvoice('${inv.id}','remind')">${svg('mail')} Send reminder</button>`:''}
     ${effStatus(inv)!=='paid'?`<button class="btn sm" style="background:var(--ok)" onclick="markPaid('${inv.id}')">${svg('check')} Mark paid</button>`:''}
   </div>
   <button class="btn" onclick="window.print()">${svg('download')} Print / Save PDF</button></div>`);
+}
+function emailInvoice(id,mode){
+  const inv=S.invoices.find(i=>i.id===id);const c=S.clients.find(x=>x.id===inv.client)||{};const co=S.company;
+  if(!c.email){toast('This client has no email address — add one first');return;}
+  const amt=money(total(inv));
+  const lines=inv.items.map(it=>`  - ${it.d||'Item'} (x${it.q}): ${money(Number(it.q)*Number(it.p))}`).join('\n');
+  let subject,body;
+  if(mode==='remind'){
+    subject=`Reminder: invoice ${inv.num} (${amt}) ${effStatus(inv)==='overdue'?'is overdue':'is due '+(inv.due||'soon')}`;
+    body=`Hi ${c.name},\n\nJust a friendly reminder that invoice ${inv.num} for ${amt} `+
+      `${effStatus(inv)==='overdue'?'was due on '+inv.due+' and is now overdue':'is due on '+(inv.due||'soon')}.\n\n`+
+      `Summary:\n${lines}\n\nTotal due: ${amt}\n\nPlease let me know if you have any questions.\n\nThanks,\n${co.name}`;
+  }else{
+    subject=`Invoice ${inv.num} from ${co.name} — ${amt}`;
+    body=`Hi ${c.name},\n\nPlease find your invoice ${inv.num} below.\n\n`+
+      `Issued: ${inv.issued}\nDue: ${inv.due||'—'}\n\nItems:\n${lines}\n\nTotal due: ${amt}\n\n`+
+      `${inv.notes||co.notes||''}\n\nThanks,\n${co.name}`;
+  }
+  const href=`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href=href;
+  // a draft you send becomes "sent"
+  if(mode==='send'&&inv.status==='draft'){
+    sb.from('invoices').update({status:'sent'}).eq('id',id).then(({error})=>{if(!error){inv.status='sent';}});
+  }
+  toast('Opening your email app…');
 }
 async function markPaid(id){
   const {error}=await sb.from('invoices').update({status:'paid'}).eq('id',id);
