@@ -7,6 +7,7 @@
 <meta name="description" content="Create, send, and track invoices in seconds. Built for freelancers and small studios.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
 <style>
 :root{
   --bg:#f6f7f9;--panel:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;
@@ -15,9 +16,9 @@
   --radius:12px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0b1120;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--line:#1f2937;--brand:#6366f1;--shadow:0 1px 3px rgba(0,0,0,.4);
+  --bg:#0b1120;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--line:#1f2937;--brand:#5b52e0;--shadow:0 1px 3px rgba(0,0,0,.4);
 }}
-:root[data-theme="dark"]{--bg:#0b1120;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--line:#1f2937;--brand:#6366f1;--shadow:0 1px 3px rgba(0,0,0,.4);}
+:root[data-theme="dark"]{--bg:#0b1120;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--line:#1f2937;--brand:#5b52e0;--shadow:0 1px 3px rgba(0,0,0,.4);}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
@@ -28,7 +29,7 @@ a{color:var(--brand);text-decoration:none}
 .app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
 .side{background:var(--panel);border-right:1px solid var(--line);padding:22px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:19px;padding:6px 10px 18px}
-.brand .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--brand),#22d3ee);display:grid;place-items:center;color:#fff;font-size:15px}
+.brand .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--brand),#0e7490);display:grid;place-items:center;color:#fff;font-size:15px;font-weight:800}
 .navb{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;color:var(--muted);font-weight:500;width:100%;text-align:left}
 .navb svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
 .navb:hover{background:var(--bg);color:var(--ink)}
@@ -117,6 +118,11 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(-
 .doc .dtot{margin-left:auto;width:260px}
 .doc .totrow{border-color:#e2e8f0}
 .doc .note{margin-top:28px;padding-top:18px;border-top:1px solid #e2e8f0;font-size:13px;color:#475569;white-space:pre-wrap}
+.doc .meta b{color:#64748b}
+.doc .b-paid{background:#dcfce7;color:#15803d}
+.doc .b-sent{background:#e0e7ff;color:#4338ca}
+.doc .b-draft{background:#f1f5f9;color:#475569}
+.doc .b-overdue{background:#fee2e2;color:#b91c1c}
 .pill-actions{display:flex;gap:8px;flex-wrap:wrap}
 
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:10px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:.25s;z-index:99}
@@ -145,7 +151,21 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(-
 </style>
 </head>
 <body>
-<div class="app">
+<div id="authView" style="min-height:100vh;display:grid;place-items:center;padding:24px">
+  <div style="width:100%;max-width:380px">
+    <div style="display:flex;align-items:center;gap:11px;justify-content:center;font-weight:800;font-size:26px;margin-bottom:6px"><span style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--brand),#0e7490);display:grid;place-items:center;color:#fff;font-weight:800">B</span> Billflow</div>
+    <p style="text-align:center;color:var(--muted);margin-bottom:24px" id="authTag">Sign in to your invoicing workspace</p>
+    <div class="panel" style="padding:22px">
+      <div class="row-gap"><label>Email</label><input class="fld" id="au_email" type="email" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="row-gap"><label>Password</label><input class="fld" id="au_pw" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doAuth()"></div>
+      <div id="authMsg" style="font-size:13px;color:var(--danger);min-height:18px;margin-bottom:8px"></div>
+      <button class="btn" style="width:100%;justify-content:center" id="authBtn" onclick="doAuth()">Sign in</button>
+      <p style="text-align:center;font-size:13px;color:var(--muted);margin-top:16px" id="authSwitch">No account? <a href="#" onclick="toggleAuthMode();return false">Create one</a></p>
+    </div>
+  </div>
+</div>
+
+<div class="app" style="display:none">
   <nav class="side">
     <div class="brand"><span class="dot">B</span> Billflow</div>
     <button class="navb" data-view="dashboard" onclick="go('dashboard')">${'' }</button>
@@ -194,10 +214,30 @@ const DEFAULT={
 };
 function isoBack(d){const x=new Date();x.setDate(x.getDate()-d);return x.toISOString().slice(0,10);}
 function isoAhead(d){return isoBack(-d);}
-let S;
-function load(){try{S=JSON.parse(localStorage.getItem('billflow'))}catch(e){}if(!S||!S.invoices)S=structuredClone(DEFAULT);}
-function save(){try{localStorage.setItem('billflow',JSON.stringify(S))}catch(e){toast('Could not save — storage full')}}
-load();
+/* ---------- Supabase backend ---------- */
+const SB_URL='https://iajxsltlhddkdxlyinmg.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhanhzbHRsaGRka2R4bHlpbm1nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3OTE3NjAsImV4cCI6MjEwNjM2Nzc2MH0.K9vuJtMDg2hsmHhnYRBpKwLPfZ-_hdHS2E7oOC21AgE';
+const sb=window.supabase.createClient(SB_URL,SB_KEY);
+let S=null, USER=null;
+
+async function loadData(){
+  const {data,error}=await sb.from('workspaces').select('data').eq('user_id',USER.id).maybeSingle();
+  if(error){toast('Load error: '+error.message);S=structuredClone(DEFAULT);return;}
+  if(data&&data.data&&data.data.invoices){S=data.data;}
+  else{S=structuredClone(DEFAULT);await save(true);}
+}
+let _saveT;
+function save(immediate){
+  const doSave=async()=>{
+    if(!USER||!S)return;
+    const {error}=await sb.from('workspaces').upsert({user_id:USER.id,data:S,updated_at:new Date().toISOString()});
+    if(error)toast('Save failed: '+error.message);
+  };
+  clearTimeout(_saveT);
+  if(immediate)return doSave();
+  _saveT=setTimeout(doSave,350);
+}
+async function signOut(){await sb.auth.signOut();USER=null;S=null;location.reload();}
 try{const t=localStorage.getItem('billflow-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}
 
 /* ---------- helpers ---------- */
@@ -293,8 +333,11 @@ function renderSettings(){
       <div><label>Default tax %</label><input class="fld" id="s_taxrate" type="number" step="0.1" value="${c.taxRate}"></div>
     </div>
     <div class="row-gap"><label>Default invoice notes / terms</label><textarea class="fld" id="s_notes" rows="2">${esc(c.notes)}</textarea></div>
-    <button class="btn" onclick="saveSettings()">${svg('check')} Save settings</button>
-    <div class="hint" style="margin-top:14px">Everything is saved in this browser only. Use Export in the future to back up. To start charging money and sync across devices, see the roadmap in the README.</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="saveSettings()">${svg('check')} Save settings</button>
+      <button class="btn ghost" onclick="signOut()">Sign out</button>
+    </div>
+    <div class="hint" style="margin-top:14px">Signed in as <b>${esc(USER?USER.email:'')}</b>. Your data is saved to your account in the cloud and syncs across devices.</div>
   </div></div>`;
 }
 function saveSettings(){
@@ -440,7 +483,50 @@ function render(){
   const m=document.getElementById('main');
   m.innerHTML=view==='dashboard'?renderDashboard():view==='invoices'?renderInvoices():view==='clients'?renderClients():renderSettings();
 }
-render();
+
+/* ---------- auth + boot ---------- */
+let authMode='signin';
+function toggleAuthMode(){
+  authMode=authMode==='signin'?'signup':'signin';
+  document.getElementById('authTag').textContent=authMode==='signin'?'Sign in to your invoicing workspace':'Create your free invoicing workspace';
+  document.getElementById('authBtn').textContent=authMode==='signin'?'Sign in':'Create account';
+  document.getElementById('authSwitch').innerHTML=authMode==='signin'?'No account? <a href="#" onclick="toggleAuthMode();return false">Create one</a>':'Have an account? <a href="#" onclick="toggleAuthMode();return false">Sign in</a>';
+  document.getElementById('au_pw').setAttribute('autocomplete',authMode==='signin'?'current-password':'new-password');
+  document.getElementById('authMsg').textContent='';
+}
+function authMsg(m,ok){const el=document.getElementById('authMsg');el.style.color=ok?'var(--ok)':'var(--danger)';el.textContent=m;}
+async function doAuth(){
+  const email=document.getElementById('au_email').value.trim();
+  const pw=document.getElementById('au_pw').value;
+  if(!email||!pw){authMsg('Enter your email and password');return;}
+  if(pw.length<6){authMsg('Password must be at least 6 characters');return;}
+  const btn=document.getElementById('authBtn');btn.disabled=true;btn.style.opacity=.6;
+  try{
+    if(authMode==='signup'){
+      const {data,error}=await sb.auth.signUp({email,password:pw});
+      if(error)throw error;
+      if(!data.session){authMsg('Account created. Check your email to confirm, then sign in.',true);authMode='signin';return;}
+      USER=data.user;await startApp();
+    }else{
+      const {data,error}=await sb.auth.signInWithPassword({email,password:pw});
+      if(error)throw error;
+      USER=data.user;await startApp();
+    }
+  }catch(e){authMsg(e.message||'Something went wrong');}
+  finally{btn.disabled=false;btn.style.opacity=1;}
+}
+async function startApp(){
+  document.getElementById('authView').style.display='none';
+  document.querySelector('.app').style.display='grid';
+  await loadData();
+  render();
+}
+async function boot(){
+  if(!window.supabase){document.getElementById('authMsg').textContent='Could not load backend. Check your connection and refresh.';return;}
+  const {data:{session}}=await sb.auth.getSession();
+  if(session){USER=session.user;await startApp();}
+}
+boot();
 </script>
 </body>
 </html>
