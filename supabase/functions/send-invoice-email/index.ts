@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "Not authenticated" }, 401);
 
-    const { invoice_id, mode } = await req.json();
+    const { invoice_id, mode, attachment } = await req.json();
     if (!invoice_id) return json({ error: "invoice_id required" }, 400);
 
     // RLS guarantees these belong to the caller.
@@ -102,10 +102,16 @@ Deno.serve(async (req) => {
         <p>Thanks,<br>${esc(co.name ?? "")}</p>
       </div>`;
 
+    const payload: Record<string, unknown> = { from: MAIL_FROM, to: [client.email], reply_to: co.email, subject, html };
+    // Optional PDF attachment: { filename, content } where content is base64 (no data: prefix)
+    if (attachment && attachment.content && attachment.filename) {
+      payload.attachments = [{ filename: String(attachment.filename), content: String(attachment.content) }];
+    }
+
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: MAIL_FROM, to: [client.email], reply_to: co.email, subject, html }),
+      body: JSON.stringify(payload),
     });
     const body = await r.json();
     if (!r.ok) return json({ error: body.message ?? "Resend rejected the email", detail: body }, 400);

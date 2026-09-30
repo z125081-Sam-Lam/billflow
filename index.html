@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.3/html2pdf.bundle.min.js"></script>
 <style>
 :root{
   --bg:#f6f7f9;--panel:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;
@@ -498,14 +499,35 @@ function viewInvoice(id){
     ${effStatus(inv)==='overdue'||effStatus(inv)==='sent'?`<button class="btn ghost sm" onclick="emailInvoice('${inv.id}','remind')">${svg('mail')} Send reminder</button>`:''}
     ${effStatus(inv)!=='paid'?`<button class="btn sm" style="background:var(--ok)" onclick="markPaid('${inv.id}')">${svg('check')} Mark paid</button>`:''}
   </div>
-  <button class="btn" onclick="window.print()">${svg('download')} Print / Save PDF</button></div>`);
+  <button class="btn" onclick="downloadInvoicePDF('${esc(inv.num)}')">${svg('download')} Download PDF</button></div>`);
+}
+function pdfOptions(name){
+  return {margin:8,filename:name+'.pdf',image:{type:'jpeg',quality:.98},
+    html2canvas:{scale:2,backgroundColor:'#ffffff',useCORS:true},
+    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}};
+}
+async function downloadInvoicePDF(num){
+  const el=document.querySelector('#printArea .doc');
+  if(!el||!window.html2pdf){toast('PDF tool not loaded — try Print instead');return;}
+  toast('Preparing PDF…');
+  try{await html2pdf().set(pdfOptions(num)).from(el).save();}
+  catch(e){toast('Could not build PDF: '+e.message);}
+}
+async function invoicePdfBase64(num){
+  const el=document.querySelector('#printArea .doc');
+  if(!el||!window.html2pdf)return null;
+  const uri=await html2pdf().set(pdfOptions(num)).from(el).outputPdf('datauristring');
+  return uri.split(',')[1]||null;
 }
 async function emailInvoice(id,mode){
   const inv=S.invoices.find(i=>i.id===id);const c=S.clients.find(x=>x.id===inv.client)||{};
   if(!c.email){toast('This client has no email address — add one first');return;}
+  toast('Preparing…');
+  let attachment=null;
+  try{const b64=await invoicePdfBase64(inv.num);if(b64)attachment={filename:inv.num+'.pdf',content:b64};}catch(e){}
   toast('Sending…');
   try{
-    const {data,error}=await sb.functions.invoke('send-invoice-email',{body:{invoice_id:id,mode}});
+    const {data,error}=await sb.functions.invoke('send-invoice-email',{body:{invoice_id:id,mode,attachment}});
     if(error)throw new Error(error.message||'function unavailable');
     if(data&&data.error)throw new Error(data.error);
     if(mode==='send'&&inv.status==='draft'){await sb.from('invoices').update({status:'sent'}).eq('id',id);inv.status='sent';render();}
