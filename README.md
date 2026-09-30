@@ -2,7 +2,7 @@
 
 Simple invoicing for freelancers and small studios. Create, send, and track invoices in seconds.
 
-**Live app:** _(GitHub Pages URL appears here after deploy)_
+**Live app:** https://z125081-sam-lam.github.io/billflow/
 
 ## What it does
 - Dashboard with paid / outstanding / overdue totals
