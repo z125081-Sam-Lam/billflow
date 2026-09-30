@@ -500,10 +500,24 @@ function viewInvoice(id){
   </div>
   <button class="btn" onclick="window.print()">${svg('download')} Print / Save PDF</button></div>`);
 }
-function emailInvoice(id,mode){
-  const inv=S.invoices.find(i=>i.id===id);const c=S.clients.find(x=>x.id===inv.client)||{};const co=S.company;
+async function emailInvoice(id,mode){
+  const inv=S.invoices.find(i=>i.id===id);const c=S.clients.find(x=>x.id===inv.client)||{};
   if(!c.email){toast('This client has no email address — add one first');return;}
-  const amt=money(total(inv));
+  toast('Sending…');
+  try{
+    const {data,error}=await sb.functions.invoke('send-invoice-email',{body:{invoice_id:id,mode}});
+    if(error)throw new Error(error.message||'function unavailable');
+    if(data&&data.error)throw new Error(data.error);
+    if(mode==='send'&&inv.status==='draft'){await sb.from('invoices').update({status:'sent'}).eq('id',id);inv.status='sent';render();}
+    toast('Email sent to '+c.email+' ✓');
+  }catch(e){
+    // automated sending not set up (or errored) — fall back to the user's mail app
+    mailtoFallback(inv,c,mode);
+    toast('Opened your email app — automated sending not set up yet');
+  }
+}
+function mailtoFallback(inv,c,mode){
+  const co=S.company, amt=money(total(inv));
   const lines=inv.items.map(it=>`  - ${it.d||'Item'} (x${it.q}): ${money(Number(it.q)*Number(it.p))}`).join('\n');
   let subject,body;
   if(mode==='remind'){
@@ -517,13 +531,8 @@ function emailInvoice(id,mode){
       `Issued: ${inv.issued}\nDue: ${inv.due||'—'}\n\nItems:\n${lines}\n\nTotal due: ${amt}\n\n`+
       `${inv.notes||co.notes||''}\n\nThanks,\n${co.name}`;
   }
-  const href=`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.location.href=href;
-  // a draft you send becomes "sent"
-  if(mode==='send'&&inv.status==='draft'){
-    sb.from('invoices').update({status:'sent'}).eq('id',id).then(({error})=>{if(!error){inv.status='sent';}});
-  }
-  toast('Opening your email app…');
+  window.location.href=`mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  if(mode==='send'&&inv.status==='draft'){sb.from('invoices').update({status:'sent'}).eq('id',inv.id).then(({error})=>{if(!error)inv.status='sent';});}
 }
 async function markPaid(id){
   const {error}=await sb.from('invoices').update({status:'paid'}).eq('id',id);
