@@ -103,9 +103,18 @@ Deno.serve(async (req) => {
       </div>`;
 
     const payload: Record<string, unknown> = { from: MAIL_FROM, to: [client.email], reply_to: co.email, subject, html };
-    // Optional PDF attachment: { filename, content } where content is base64 (no data: prefix)
-    if (attachment && attachment.content && attachment.filename) {
-      payload.attachments = [{ filename: String(attachment.filename), content: String(attachment.content) }];
+    // Optional PDF attachment: { filename, content } where content is base64 (no data: prefix).
+    if (attachment && attachment.content) {
+      const content = String(attachment.content);
+      // must be valid base64 and within a sane size (~8MB decoded)
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(content) || content.length > 11_000_000) {
+        return json({ error: "Invalid or oversized attachment" }, 400);
+      }
+      // strip any path/control chars from the filename; force a .pdf name we control
+      const safe = String(attachment.filename ?? "invoice")
+        .replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "").slice(0, 80) || "invoice";
+      const filename = safe.toLowerCase().endsWith(".pdf") ? safe : `${safe}.pdf`;
+      payload.attachments = [{ filename, content }];
     }
 
     const r = await fetch("https://api.resend.com/emails", {
