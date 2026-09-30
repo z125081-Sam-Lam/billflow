@@ -221,21 +221,24 @@ const sb=window.supabase.createClient(SB_URL,SB_KEY);
 let S=null, USER=null;
 
 async function loadData(){
-  const {data,error}=await sb.from('workspaces').select('data').eq('user_id',USER.id).maybeSingle();
-  if(error){toast('Load error: '+error.message);S=structuredClone(DEFAULT);return;}
-  if(data&&data.data&&data.data.invoices){S=data.data;}
-  else{S=structuredClone(DEFAULT);await save(true);}
+  const [c,i,s]=await Promise.all([
+    sb.from('clients').select('*').order('created_at',{ascending:true}),
+    sb.from('invoices').select('*').order('issued',{ascending:false}),
+    sb.from('settings').select('*').eq('user_id',USER.id).maybeSingle()
+  ]);
+  const err=c.error||i.error||s.error;
+  if(err){toast('Load error: '+err.message);}
+  const clients=(c.data||[]).map(r=>({id:r.id,name:r.name,email:r.email||'',address:r.address||''}));
+  const invoices=(i.data||[]).map(r=>({id:r.id,num:r.num,client:r.client_id,issued:r.issued,due:r.due,status:r.status||'draft',items:Array.isArray(r.items)?r.items:[],taxRate:Number(r.tax_rate)||0,discount:Number(r.discount)||0,notes:r.notes||''}));
+  const hasSettings=s.data&&s.data.company&&s.data.company.name;
+  const company=hasSettings?s.data.company:structuredClone(DEFAULT.company);
+  const seq=(s.data&&s.data.seq)?s.data.seq:(invoices.length+1);
+  if(!hasSettings){await sb.from('settings').upsert({user_id:USER.id,company,seq});}
+  S={company,clients,invoices,seq};
 }
-let _saveT;
-function save(immediate){
-  const doSave=async()=>{
-    if(!USER||!S)return;
-    const {error}=await sb.from('workspaces').upsert({user_id:USER.id,data:S,updated_at:new Date().toISOString()});
-    if(error)toast('Save failed: '+error.message);
-  };
-  clearTimeout(_saveT);
-  if(immediate)return doSave();
-  _saveT=setTimeout(doSave,350);
+async function persistSettings(){
+  const {error}=await sb.from('settings').upsert({user_id:USER.id,company:S.company,seq:S.seq,updated_at:new Date().toISOString()});
+  if(error)toast('Save failed: '+error.message);
 }
 async function signOut(){await sb.auth.signOut();USER=null;S=null;location.reload();}
 try{const t=localStorage.getItem('billflow-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}
@@ -340,10 +343,10 @@ function renderSettings(){
     <div class="hint" style="margin-top:14px">Signed in as <b>${esc(USER?USER.email:'')}</b>. Your data is saved to your account in the cloud and syncs across devices.</div>
   </div></div>`;
 }
-function saveSettings(){
+async function saveSettings(){
   const g=id=>document.getElementById(id).value;
   Object.assign(S.company,{name:g('s_name'),email:g('s_email'),address:g('s_address'),currency:g('s_cur'),taxName:g('s_taxname'),taxRate:parseFloat(g('s_taxrate'))||0,notes:g('s_notes')});
-  save();toast('Settings saved');
+  await persistSettings();toast('Settings saved');
 }
 
 /* ---------- client modal ---------- */
@@ -356,17 +359,27 @@ function editClient(id){
   <div class="mf"><div>${id?`<button class="btn danger sm" onclick="delClient('${id}')">${svg('trash')} Delete</button>`:'<span></span>'}</div>
   <button class="btn" onclick="saveClient('${id||''}')">${svg('check')} Save client</button></div>`);
 }
-function saveClient(id){
+async function saveClient(id){
   const g=x=>document.getElementById(x).value.trim();
   const name=g('c_name');if(!name){toast('Name is required');return;}
-  if(id){const c=S.clients.find(x=>x.id===id);Object.assign(c,{name,email:g('c_email'),address:g('c_addr')});}
-  else S.clients.push({id:uid(),name,email:g('c_email'),address:g('c_addr')});
-  save();closeModal();render();toast('Client saved');
+  const payload={name,email:g('c_email'),address:g('c_addr')};
+  if(id){
+    const {error}=await sb.from('clients').update(payload).eq('id',id);
+    if(error){toast('Save failed: '+error.message);return;}
+    Object.assign(S.clients.find(x=>x.id===id),payload);
+  }else{
+    const {data,error}=await sb.from('clients').insert(payload).select().single();
+    if(error){toast('Save failed: '+error.message);return;}
+    S.clients.push({id:data.id,...payload});
+  }
+  closeModal();render();toast('Client saved');
 }
-function delClient(id){
+async function delClient(id){
   if(S.invoices.some(i=>i.client===id)){toast('Has invoices — reassign them first');return;}
   if(!confirm('Delete this client?'))return;
-  S.clients=S.clients.filter(c=>c.id!==id);save();closeModal();render();toast('Client deleted');
+  const {error}=await sb.from('clients').delete().eq('id',id);
+  if(error){toast('Delete failed: '+error.message);return;}
+  S.clients=S.clients.filter(c=>c.id!==id);closeModal();render();toast('Client deleted');
 }
 
 /* ---------- invoice editor ---------- */
@@ -428,7 +441,7 @@ function recalc(){
   document.getElementById('e_taxamt').textContent=money(tax);
   document.getElementById('e_total').textContent=money(s-draft.discount+tax);
 }
-function saveInvoice(){
+async function saveInvoice(){
   draft.num=document.getElementById('e_num').value.trim()||draft.num;
   draft.client=document.getElementById('e_client').value;
   draft.issued=document.getElementById('e_issued').value;
@@ -436,11 +449,25 @@ function saveInvoice(){
   draft.status=document.getElementById('e_status').value;
   draft.notes=document.getElementById('e_notes').value;
   recalc();
-  if(draft.id){const i=S.invoices.findIndex(x=>x.id===draft.id);S.invoices[i]=draft;}
-  else{draft.id=uid();S.invoices.push(draft);S.seq++;}
-  save();closeModal();render();toast('Invoice saved');
+  draft.items=draft.items.map(it=>({d:it.d||'',q:Number(it.q)||0,p:Number(it.p)||0}));
+  const row={num:draft.num,client_id:draft.client,issued:draft.issued||null,due:draft.due||null,status:draft.status,items:draft.items,tax_rate:draft.taxRate,discount:draft.discount,notes:draft.notes};
+  if(draft.id){
+    const {error}=await sb.from('invoices').update(row).eq('id',draft.id);
+    if(error){toast('Save failed: '+error.message);return;}
+    S.invoices[S.invoices.findIndex(x=>x.id===draft.id)]=structuredClone(draft);
+  }else{
+    const {data,error}=await sb.from('invoices').insert(row).select().single();
+    if(error){toast('Save failed: '+error.message);return;}
+    draft.id=data.id;S.invoices.push(structuredClone(draft));S.seq++;await persistSettings();
+  }
+  closeModal();render();toast('Invoice saved');
 }
-function delInvoice(id){if(!confirm('Delete this invoice?'))return;S.invoices=S.invoices.filter(i=>i.id!==id);save();closeModal();render();toast('Invoice deleted');}
+async function delInvoice(id){
+  if(!confirm('Delete this invoice?'))return;
+  const {error}=await sb.from('invoices').delete().eq('id',id);
+  if(error){toast('Delete failed: '+error.message);return;}
+  S.invoices=S.invoices.filter(i=>i.id!==id);closeModal();render();toast('Invoice deleted');
+}
 
 /* ---------- invoice view / print ---------- */
 function viewInvoice(id){
@@ -470,7 +497,11 @@ function viewInvoice(id){
   </div>
   <button class="btn" onclick="window.print()">${svg('download')} Print / Save PDF</button></div>`);
 }
-function markPaid(id){S.invoices.find(i=>i.id===id).status='paid';save();closeModal();render();toast('Marked as paid 🎉');}
+async function markPaid(id){
+  const {error}=await sb.from('invoices').update({status:'paid'}).eq('id',id);
+  if(error){toast('Update failed: '+error.message);return;}
+  S.invoices.find(i=>i.id===id).status='paid';closeModal();render();toast('Marked as paid 🎉');
+}
 
 /* ---------- modal plumbing ---------- */
 function openModal(html){document.getElementById('modalHost').innerHTML=`<div class="modal">${html}</div>`;document.getElementById('scrim').classList.add('open');}
